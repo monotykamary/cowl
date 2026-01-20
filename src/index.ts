@@ -67,6 +67,24 @@ function resultError(result: ReturnType<typeof run>): string {
   return result.stderr || result.stdout || result.error?.message || "unknown error";
 }
 
+function ensureBranch(path: string, branchName: string) {
+  const exists = run("git", [
+    "-C",
+    path,
+    "show-ref",
+    "--verify",
+    `refs/heads/${branchName}`,
+  ]);
+  const args =
+    exists.status === 0
+      ? ["-C", path, "checkout", branchName]
+      : ["-C", path, "checkout", "-b", branchName];
+  const checkout = run("git", args);
+  if (checkout.status !== 0) {
+    fail(`git checkout failed: ${resultError(checkout)}`);
+  }
+}
+
 function slugify(input: string): string {
   const lowered = input.trim().toLowerCase();
   const replaced = lowered.replace(/[^a-z0-9]+/g, "-");
@@ -266,13 +284,14 @@ Usage:
   cowl cd <name>
   cowl path <name>
   cowl list [--all]
-  cowl merge <name> [--dry-run] [--keep] [--delete]
+  cowl merge <name> [--dry-run] [--keep] [--delete] [--branch]
   cowl clean <name>
 
 Notes:
   - Use eval for pushd output, or compose: pushd -- "$(cowl new)".
   - merge uses git when the current directory is a repo root.
   - merge cleans the variation by default; use --keep to retain it.
+  - merge --branch creates or switches to cowl/<variation> (git only).
 `);
 }
 
@@ -413,8 +432,13 @@ function mergeWithGit(
   sourcePath: string,
   variationPath: string,
   baseCommit: string,
-  dryRun: boolean
+  dryRun: boolean,
+  branchName?: string
 ) {
+  if (branchName && !dryRun) {
+    ensureBranch(sourcePath, branchName);
+  }
+
   const diff = run("git", [
     "-C",
     variationPath,
@@ -495,10 +519,20 @@ function cmdMerge(flags: Set<string>, positionals: string[]) {
   const keep = flags.has("keep");
   const allowDelete = flags.has("delete");
   const gitBase = meta?.gitBase;
+  const wantsBranch = flags.has("branch");
+  const branchName = wantsBranch
+    ? `cowl/${meta?.name ?? slugify(name)}`
+    : undefined;
 
   if (gitBase && hasGitRepo(sourcePath)) {
-    mergeWithGit(sourcePath, variationPath, gitBase, dryRun);
+    if (wantsBranch && dryRun) {
+      console.error("Skipping branch creation in dry-run mode.");
+    }
+    mergeWithGit(sourcePath, variationPath, gitBase, dryRun, branchName);
   } else {
+    if (wantsBranch) {
+      fail("merge --branch requires a git repo root.");
+    }
     mergeWithRsync(sourcePath, variationPath, dryRun, allowDelete);
   }
 

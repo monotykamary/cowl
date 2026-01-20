@@ -44,6 +44,12 @@ Merge changes back into the current directory (default: cleans up the variation)
 cowl merge <name>
 ```
 
+Merge into a new branch in the source repo:
+
+```bash
+cowl merge <name> --branch
+```
+
 Keep the variation after merging:
 
 ```bash
@@ -67,6 +73,7 @@ cowl clean <name>
 - Variations live in `~/.cowl/<basename>-<hash>/<variation>`.
 - `cowl new` uses the current directory as the source.
 - Git merge: if the source directory is a git repo root, merge uses git 3-way apply and syncs untracked files.
+- `cowl merge --branch` creates or switches to `cowl/<variation>` in the source repo.
 - Rsync merge: if git is unavailable, merge uses rsync; deletions are opt-in with `--delete`.
 
 ## Commands
@@ -75,6 +82,5 @@ cowl clean <name>
 - `cowl cd <name>`
 - `cowl path <name>`
 - `cowl list [--all]`
-- `cowl merge <name> [--dry-run] [--keep] [--delete]`
+- `cowl merge <name> [--dry-run] [--keep] [--delete] [--branch]`
 - `cowl clean <name>`
-
