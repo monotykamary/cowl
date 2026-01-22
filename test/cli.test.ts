@@ -142,6 +142,40 @@ test("new creates variation and helpers work", () => {
   }
 });
 
+test("shell snippet and install-shell work", () => {
+  const sandbox = createSandbox();
+  try {
+    const snippet = runCowl(["shell", "--shell", "zsh"], {
+      cwd: sandbox.source,
+      home: sandbox.home,
+    });
+    expect(snippet.status).toBe(0);
+    expect(snippet.stdout).toContain("cowl()");
+    expect(snippet.stdout).toContain("pushd --");
+
+    const install = runCowl(["install-shell", "--shell", "zsh"], {
+      cwd: sandbox.source,
+      home: sandbox.home,
+    });
+    expect(install.status).toBe(0);
+
+    const rcPath = join(sandbox.home, ".zshrc");
+    const content = readFileSync(rcPath, "utf8");
+    expect(content).toContain("cowl()");
+
+    const reinstall = runCowl(["install-shell", "--shell", "zsh"], {
+      cwd: sandbox.source,
+      home: sandbox.home,
+    });
+    expect(reinstall.status).toBe(0);
+    const contentAgain = readFileSync(rcPath, "utf8");
+    const startCount = (contentAgain.match(/cowl shell >>>/g) ?? []).length;
+    expect(startCount).toBe(1);
+  } finally {
+    sandbox.cleanup();
+  }
+});
+
 testRsync("merge (rsync) updates files and cleans by default", () => {
   const sandbox = createSandbox();
   try {

@@ -16,6 +16,8 @@ import { createHash } from "crypto";
 
 const META_FILE = ".cowl.json";
 const COWL_ROOT = join(os.homedir(), ".cowl");
+const SHELL_MARKER_START = "# >>> cowl shell >>>";
+const SHELL_MARKER_END = "# <<< cowl shell <<<";
 
 type Meta = {
   version: 1;
@@ -26,22 +28,44 @@ type Meta = {
   gitBase?: string;
 };
 
+type ShellName = "bash" | "fish" | "zsh";
+
 type ParsedArgs = {
   flags: Set<string>;
+  options: Record<string, string>;
   positionals: string[];
 };
 
 function parseArgs(args: string[]): ParsedArgs {
   const flags = new Set<string>();
+  const options: Record<string, string> = {};
   const positionals: string[] = [];
-  for (const arg of args) {
+  const valueOptions = new Set(["shell", "rc"]);
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
     if (arg.startsWith("--")) {
-      flags.add(arg.slice(2));
+      const key = arg.slice(2);
+      const inlineIndex = key.indexOf("=");
+      if (inlineIndex !== -1) {
+        const optionKey = key.slice(0, inlineIndex);
+        options[optionKey] = key.slice(inlineIndex + 1);
+        continue;
+      }
+      if (valueOptions.has(key)) {
+        const next = args[i + 1];
+        if (!next || next.startsWith("--")) {
+          fail(`Missing value for --${key}.`);
+        }
+        options[key] = next;
+        i += 1;
+        continue;
+      }
+      flags.add(key);
       continue;
     }
     positionals.push(arg);
   }
-  return { flags, positionals };
+  return { flags, options, positionals };
 }
 
 function fail(message: string): never {
@@ -93,6 +117,94 @@ function slugify(input: string): string {
 
 function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function detectShellName(): ShellName | null {
+  const shell = process.env.SHELL ?? "";
+  if (shell.includes("zsh")) {
+    return "zsh";
+  }
+  if (shell.includes("bash")) {
+    return "bash";
+  }
+  if (shell.includes("fish")) {
+    return "fish";
+  }
+  return null;
+}
+
+function expandHome(path: string): string {
+  if (path === "~") {
+    return os.homedir();
+  }
+  if (path.startsWith("~/")) {
+    return join(os.homedir(), path.slice(2));
+  }
+  return path;
+}
+
+function defaultRcPath(shellName: ShellName): string {
+  const home = os.homedir();
+  switch (shellName) {
+    case "zsh":
+      return join(home, ".zshrc");
+    case "bash":
+      return join(home, ".bashrc");
+    case "fish":
+      return join(home, ".config", "fish", "config.fish");
+  }
+}
+
+function shellSnippet(shellName: ShellName): string {
+  if (shellName === "fish") {
+    return `${SHELL_MARKER_START}
+function cowl
+  if test (count $argv) -ge 1; and test $argv[1] = "new"
+    set -l args $argv
+    set -e args[1]
+    set -l path (command cowl new $args | string collect | string trim)
+    or return $status
+    pushd -- $path
+  else
+    command cowl $argv
+  end
+end
+${SHELL_MARKER_END}`;
+  }
+
+  return `${SHELL_MARKER_START}
+cowl() {
+  if [ "$1" = "new" ]; then
+    shift
+    local path
+    path="$(command cowl new "$@")" || return
+    pushd -- "$path"
+  else
+    command cowl "$@"
+  fi
+}
+${SHELL_MARKER_END}`;
+}
+
+function resolveShellName(
+  options: Record<string, string>,
+  flags: Set<string>
+): ShellName {
+  if (flags.has("shell")) {
+    fail("Missing value for --shell.");
+  }
+  if (options.shell) {
+    const normalized = options.shell.trim().toLowerCase();
+    if (normalized === "zsh" || normalized === "bash" || normalized === "fish") {
+      return normalized;
+    }
+    fail(`Unsupported shell: ${options.shell}`);
+  }
+  const detected = detectShellName();
+  if (!detected) {
+    fail("Unable to detect shell. Use --shell zsh|bash|fish.");
+  }
+  return detected;
 }
 
 function shortHash(input: string): string {
@@ -284,6 +396,8 @@ Usage:
   cowl cd <name>
   cowl path <name>
   cowl list [--all]
+  cowl shell [--shell zsh|bash|fish]
+  cowl install-shell [--shell zsh|bash|fish] [--rc path]
   cowl merge <name> [--dry-run] [--keep] [--delete] [--branch]
   cowl clean <name>
 
@@ -292,6 +406,7 @@ Notes:
   - merge uses git when the current directory is a repo root.
   - merge cleans the variation by default; use --keep to retain it.
   - merge --branch creates or switches to cowl/<variation> (git only).
+  - install-shell adds a wrapper so cowl new runs pushd automatically.
 `);
 }
 
@@ -399,6 +514,31 @@ function cmdClean(positionals: string[]) {
     fail(`Variation does not exist: ${variationPath}`);
   }
   rmSync(variationPath, { recursive: true, force: false });
+}
+
+function cmdShell(options: Record<string, string>, flags: Set<string>) {
+  const shellName = resolveShellName(options, flags);
+  console.log(shellSnippet(shellName));
+}
+
+function cmdInstallShell(options: Record<string, string>, flags: Set<string>) {
+  const shellName = resolveShellName(options, flags);
+  const rcPath = expandHome(options.rc ?? defaultRcPath(shellName));
+  ensureDir(dirname(rcPath));
+
+  const snippet = shellSnippet(shellName);
+  const existing = existsSync(rcPath) ? readFileSync(rcPath, "utf8") : "";
+  if (
+    existing.includes(SHELL_MARKER_START) &&
+    existing.includes(SHELL_MARKER_END)
+  ) {
+    console.log(`Shell integration already installed in ${rcPath}`);
+    return;
+  }
+  const needsNewline = existing.length > 0 && !existing.endsWith("\n");
+  const content = `${existing}${needsNewline ? "\n" : ""}${snippet}\n`;
+  writeFileSync(rcPath, content);
+  console.log(`Installed shell integration in ${rcPath}`);
 }
 
 function copyUntrackedWithRsync(
@@ -563,6 +703,12 @@ function main() {
       break;
     case "list":
       cmdList(parsed.flags);
+      break;
+    case "shell":
+      cmdShell(parsed.options, parsed.flags);
+      break;
+    case "install-shell":
+      cmdInstallShell(parsed.options, parsed.flags);
       break;
     case "clean":
     case "rm":

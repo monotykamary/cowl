@@ -32,6 +32,22 @@ If you want to jump to an existing variation:
 eval "$(cowl cd <name>)"
 ```
 
+## Shell Integration (Optional)
+
+Install a shell wrapper that makes `cowl new` run `pushd` automatically:
+
+```bash
+cowl install-shell --shell zsh
+```
+
+Then reload your shell config or open a new terminal.
+
+If you want to preview the snippet instead of installing it:
+
+```bash
+cowl shell --shell zsh
+```
+
 List variations for the current project:
 
 ```bash
@@ -82,5 +98,7 @@ cowl clean <name>
 - `cowl cd <name>`
 - `cowl path <name>`
 - `cowl list [--all]`
+- `cowl shell [--shell zsh|bash|fish]`
+- `cowl install-shell [--shell zsh|bash|fish] [--rc path]`
 - `cowl merge <name> [--dry-run] [--keep] [--delete] [--branch]`
 - `cowl clean <name>`
