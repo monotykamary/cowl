@@ -398,6 +398,7 @@ Usage:
   cowl list [--all]
   cowl shell [--shell zsh|bash|fish]
   cowl install-shell [--shell zsh|bash|fish] [--rc path]
+  cowl uninstall-shell [--shell zsh|bash|fish] [--rc path]
   cowl merge <name> [--dry-run] [--keep] [--delete] [--branch]
   cowl clean <name>
 
@@ -407,6 +408,7 @@ Notes:
   - merge cleans the variation by default; use --keep to retain it.
   - merge --branch creates or switches to cowl/<variation> (git only).
   - install-shell adds a wrapper so cowl new runs pushd automatically.
+  - uninstall-shell removes the wrapper block from your shell rc file.
 `);
 }
 
@@ -539,6 +541,27 @@ function cmdInstallShell(options: Record<string, string>, flags: Set<string>) {
   const content = `${existing}${needsNewline ? "\n" : ""}${snippet}\n`;
   writeFileSync(rcPath, content);
   console.log(`Installed shell integration in ${rcPath}`);
+}
+
+function cmdUninstallShell(options: Record<string, string>, flags: Set<string>) {
+  const shellName = resolveShellName(options, flags);
+  const rcPath = expandHome(options.rc ?? defaultRcPath(shellName));
+  if (!existsSync(rcPath)) {
+    console.log(`Shell config not found: ${rcPath}`);
+    return;
+  }
+  const existing = readFileSync(rcPath, "utf8");
+  const startIndex = existing.indexOf(SHELL_MARKER_START);
+  const endIndex = existing.indexOf(SHELL_MARKER_END);
+  if (startIndex === -1 || endIndex === -1 || endIndex < startIndex) {
+    console.log(`Shell integration not found in ${rcPath}`);
+    return;
+  }
+  const afterEnd = endIndex + SHELL_MARKER_END.length;
+  let updated = `${existing.slice(0, startIndex)}${existing.slice(afterEnd)}`;
+  updated = updated.replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "");
+  writeFileSync(rcPath, updated);
+  console.log(`Removed shell integration from ${rcPath}`);
 }
 
 function copyUntrackedWithRsync(
@@ -709,6 +732,9 @@ function main() {
       break;
     case "install-shell":
       cmdInstallShell(parsed.options, parsed.flags);
+      break;
+    case "uninstall-shell":
+      cmdUninstallShell(parsed.options, parsed.flags);
       break;
     case "clean":
     case "rm":

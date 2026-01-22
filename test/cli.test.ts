@@ -171,6 +171,14 @@ test("shell snippet and install-shell work", () => {
     const contentAgain = readFileSync(rcPath, "utf8");
     const startCount = (contentAgain.match(/cowl shell >>>/g) ?? []).length;
     expect(startCount).toBe(1);
+
+    const uninstall = runCowl(["uninstall-shell", "--shell", "zsh"], {
+      cwd: sandbox.source,
+      home: sandbox.home,
+    });
+    expect(uninstall.status).toBe(0);
+    const afterRemove = readFileSync(rcPath, "utf8");
+    expect(afterRemove).not.toContain("cowl shell >>>");
   } finally {
     sandbox.cleanup();
   }

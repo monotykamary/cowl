@@ -48,6 +48,12 @@ If you want to preview the snippet instead of installing it:
 cowl shell --shell zsh
 ```
 
+Remove the wrapper:
+
+```bash
+cowl uninstall-shell --shell zsh
+```
+
 List variations for the current project:
 
 ```bash
@@ -100,5 +106,6 @@ cowl clean <name>
 - `cowl list [--all]`
 - `cowl shell [--shell zsh|bash|fish]`
 - `cowl install-shell [--shell zsh|bash|fish] [--rc path]`
+- `cowl uninstall-shell [--shell zsh|bash|fish] [--rc path]`
 - `cowl merge <name> [--dry-run] [--keep] [--delete] [--branch]`
 - `cowl clean <name>`
