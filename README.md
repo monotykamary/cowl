@@ -60,6 +60,24 @@ List variations for the current project:
 cowl list
 ```
 
+Show the project root for the current directory:
+
+```bash
+cowl root
+```
+
+Inspect a variation:
+
+```bash
+cowl info <name>
+```
+
+Check a variation's git status:
+
+```bash
+cowl status <name>
+```
+
 Merge changes back into the current directory (default: cleans up the variation):
 
 ```bash
@@ -70,6 +88,12 @@ Merge into a new branch in the source repo:
 
 ```bash
 cowl merge <name> --branch
+```
+
+Merge into a specific branch name:
+
+```bash
+cowl merge <name> --branch feature/cowl-merge
 ```
 
 Keep the variation after merging:
@@ -97,6 +121,7 @@ cowl clean <name>
 - Git merge: if the source directory is a git repo root, merge uses git 3-way apply and syncs untracked files.
 - `cowl merge --branch` creates or switches to `cowl/<variation>` in the source repo.
 - Rsync merge: if git is unavailable, merge uses rsync; deletions are opt-in with `--delete`.
+- Use `--no-color` or `NO_COLOR=1` to disable ANSI formatting.
 
 ## Commands
 
@@ -104,8 +129,11 @@ cowl clean <name>
 - `cowl cd <name>`
 - `cowl path <name>`
 - `cowl list [--all]`
+- `cowl root`
+- `cowl info <name>`
+- `cowl status <name>`
 - `cowl shell [--shell zsh|bash|fish]`
 - `cowl install-shell [--shell zsh|bash|fish] [--rc path]`
 - `cowl uninstall-shell [--shell zsh|bash|fish] [--rc path]`
-- `cowl merge <name> [--dry-run] [--keep] [--delete] [--branch]`
+- `cowl merge <name> [--dry-run] [--keep] [--delete] [--branch [name]]`
 - `cowl clean <name>`

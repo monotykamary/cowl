@@ -130,6 +130,29 @@ test("new creates variation and helpers work", () => {
     expect(listResult.status).toBe(0);
     expect(listResult.stdout).toContain(variationPath);
 
+    const rootResult = runCowl(["root"], {
+      cwd: sandbox.source,
+      home: sandbox.home,
+    });
+    expect(rootResult.status).toBe(0);
+    const rootPath = rootResult.stdout.trim();
+    expect(existsSync(rootPath)).toBe(true);
+
+    const infoResult = runCowl(["info", name, "--no-color"], {
+      cwd: sandbox.source,
+      home: sandbox.home,
+    });
+    expect(infoResult.status).toBe(0);
+    expect(infoResult.stdout).toContain(`Name: ${name}`);
+    expect(infoResult.stdout).toContain(`Path: ${variationPath}`);
+
+    const statusResult = runCowl(["status", name, "--no-color"], {
+      cwd: sandbox.source,
+      home: sandbox.home,
+    });
+    expect(statusResult.status).toBe(0);
+    expect(statusResult.stdout.trim()).toBe("no-git");
+
     const newCd = runCowl(["new", "--cd"], {
       cwd: sandbox.source,
       home: sandbox.home,
@@ -292,6 +315,37 @@ testGit("merge --branch creates branch in git repo", () => {
     expect(branch.status).toBe(0);
     expect(branch.stdout.trim()).toBe("cowl/git-merge");
     expect(existsSync(variationPath)).toBe(false);
+
+    runCmd("git", ["add", "tracked.txt"], { cwd: sandbox.source });
+    const commit2 = runCmd("git", ["commit", "-m", "merge one"], {
+      cwd: sandbox.source,
+    });
+    expect(commit2.status).toBe(0);
+
+    const created2 = runCowl(["new", "git-merge-2"], {
+      cwd: sandbox.source,
+      home: sandbox.home,
+    });
+    expect(created2.status).toBe(0);
+    const variationPath2 = created2.stdout.trim();
+    writeFileSync(join(variationPath2, "tracked.txt"), "changed-again");
+
+    const merged2 = runCowl(
+      ["merge", "git-merge-2", "--branch", "feature/cowl-merge"],
+      {
+        cwd: sandbox.source,
+        home: sandbox.home,
+      }
+    );
+    expect(merged2.status).toBe(0);
+    const branch2 = runCmd(
+      "git",
+      ["rev-parse", "--abbrev-ref", "HEAD"],
+      { cwd: sandbox.source }
+    );
+    expect(branch2.status).toBe(0);
+    expect(branch2.stdout.trim()).toBe("feature/cowl-merge");
+    expect(existsSync(variationPath2)).toBe(false);
   } finally {
     sandbox.cleanup();
   }

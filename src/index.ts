@@ -19,6 +19,28 @@ const COWL_ROOT = join(os.homedir(), ".cowl");
 const SHELL_MARKER_START = "# >>> cowl shell >>>";
 const SHELL_MARKER_END = "# <<< cowl shell <<<";
 
+let useColor = process.stdout.isTTY && !process.env.NO_COLOR;
+
+function setColorEnabled(enabled: boolean) {
+  useColor = enabled;
+}
+
+function color(code: string, value: string): string {
+  if (!useColor) {
+    return value;
+  }
+  return `\\x1b[${code}m${value}\\x1b[0m`;
+}
+
+const fmt = {
+  bold: (value: string) => color("1", value),
+  dim: (value: string) => color("2", value),
+  red: (value: string) => color("31", value),
+  green: (value: string) => color("32", value),
+  yellow: (value: string) => color("33", value),
+  cyan: (value: string) => color("36", value),
+};
+
 type Meta = {
   version: 1;
   name: string;
@@ -40,7 +62,7 @@ function parseArgs(args: string[]): ParsedArgs {
   const flags = new Set<string>();
   const options: Record<string, string> = {};
   const positionals: string[] = [];
-  const valueOptions = new Set(["shell", "rc"]);
+  const valueOptions = new Set(["shell", "rc", "branch"]);
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
     if (arg.startsWith("--")) {
@@ -54,6 +76,10 @@ function parseArgs(args: string[]): ParsedArgs {
       if (valueOptions.has(key)) {
         const next = args[i + 1];
         if (!next || next.startsWith("--")) {
+          if (key === "branch") {
+            flags.add(key);
+            continue;
+          }
           fail(`Missing value for --${key}.`);
         }
         options[key] = next;
@@ -69,7 +95,7 @@ function parseArgs(args: string[]): ParsedArgs {
 }
 
 function fail(message: string): never {
-  console.error(message);
+  console.error(fmt.red(message));
   process.exit(1);
 }
 
@@ -117,6 +143,13 @@ function slugify(input: string): string {
 
 function shellEscape(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function shortSha(value?: string): string {
+  if (!value) {
+    return "";
+  }
+  return value.length > 7 ? value.slice(0, 7) : value;
 }
 
 function detectShellName(): ShellName | null {
@@ -340,6 +373,22 @@ function hasGitRepo(path: string): boolean {
   return existsSync(join(path, ".git"));
 }
 
+function commandExists(cmd: string): boolean {
+  const result = run(cmd, ["--version"]);
+  const err = result.error as NodeJS.ErrnoException | undefined;
+  if (err?.code === "ENOENT") {
+    return false;
+  }
+  return result.status === 0;
+}
+
+function ensureRsync() {
+  if (commandExists("rsync")) {
+    return;
+  }
+  fail("rsync is required for this operation. Install rsync or use git.");
+}
+
 function getGitBase(sourcePath: string): string | null {
   if (!hasGitRepo(sourcePath)) {
     return null;
@@ -349,6 +398,43 @@ function getGitBase(sourcePath: string): string | null {
     return null;
   }
   return result.stdout.trim();
+}
+
+type RepoStatus = {
+  state: "clean" | "dirty" | "no-git" | "error";
+  count?: number;
+  error?: string;
+};
+
+function getRepoStatus(path: string): RepoStatus {
+  if (!hasGitRepo(path)) {
+    return { state: "no-git" };
+  }
+  const result = run("git", ["-C", path, "status", "--porcelain"]);
+  if (result.status !== 0) {
+    return { state: "error", error: resultError(result) };
+  }
+  const trimmed = result.stdout.trim();
+  if (!trimmed) {
+    return { state: "clean" };
+  }
+  const count = trimmed.split("\n").filter(Boolean).length;
+  return { state: "dirty", count };
+}
+
+function formatStatus(info: RepoStatus): string {
+  switch (info.state) {
+    case "clean":
+      return fmt.green("clean");
+    case "dirty":
+      return fmt.yellow(
+        info.count ? `dirty (${info.count})` : "dirty"
+      );
+    case "no-git":
+      return fmt.dim("no-git");
+    default:
+      return fmt.red("error");
+  }
 }
 
 function cowCopyDir(sourcePath: string, destPath: string) {
@@ -396,10 +482,13 @@ Usage:
   cowl cd <name>
   cowl path <name>
   cowl list [--all]
+  cowl root
+  cowl info <name>
+  cowl status <name>
   cowl shell [--shell zsh|bash|fish]
   cowl install-shell [--shell zsh|bash|fish] [--rc path]
   cowl uninstall-shell [--shell zsh|bash|fish] [--rc path]
-  cowl merge <name> [--dry-run] [--keep] [--delete] [--branch]
+  cowl merge <name> [--dry-run] [--keep] [--delete] [--branch [name]]
   cowl clean <name>
 
 Notes:
@@ -409,6 +498,7 @@ Notes:
   - merge --branch creates or switches to cowl/<variation> (git only).
   - install-shell adds a wrapper so cowl new runs pushd automatically.
   - uninstall-shell removes the wrapper block from your shell rc file.
+  - use --no-color to disable ANSI formatting.
 `);
 }
 
@@ -505,6 +595,63 @@ function cmdList(flags: Set<string>) {
   }
 }
 
+function cmdRoot() {
+  const sourcePath = getSourcePath();
+  const root = getProjectRoot(sourcePath);
+  console.log(root);
+}
+
+function cmdInfo(positionals: string[]) {
+  const name = positionals[0];
+  if (!name) {
+    fail("Name is required.");
+  }
+  const sourcePath = getSourcePath();
+  const variationPath = getVariationPath(sourcePath, name);
+  if (!existsSync(variationPath)) {
+    fail(`Variation does not exist: ${variationPath}`);
+  }
+  const meta = readMeta(variationPath);
+  const project = meta?.project ?? projectSlug(sourcePath);
+  const rootPath = join(COWL_ROOT, project);
+  const status = getRepoStatus(variationPath);
+
+  const lines = [
+    `${fmt.cyan("Name")}: ${meta?.name ?? slugify(name)}`,
+    `${fmt.cyan("Path")}: ${variationPath}`,
+    `${fmt.cyan("Root")}: ${rootPath}`,
+    `${fmt.cyan("Source")}: ${meta?.sourcePath ?? fmt.dim("unknown")}`,
+    `${fmt.cyan("Created")}: ${meta?.createdAt ?? fmt.dim("unknown")}`,
+    `${fmt.cyan("Git base")}: ${
+      meta?.gitBase ? shortSha(meta.gitBase) : fmt.dim("none")
+    }`,
+    `${fmt.cyan("Status")}: ${formatStatus(status)}`,
+  ];
+
+  if (status.state === "error" && status.error) {
+    console.error(fmt.red(`git status failed: ${status.error}`));
+  }
+
+  console.log(lines.join("\n"));
+}
+
+function cmdStatus(positionals: string[]) {
+  const name = positionals[0];
+  if (!name) {
+    fail("Name is required.");
+  }
+  const sourcePath = getSourcePath();
+  const variationPath = getVariationPath(sourcePath, name);
+  if (!existsSync(variationPath)) {
+    fail(`Variation does not exist: ${variationPath}`);
+  }
+  const status = getRepoStatus(variationPath);
+  if (status.state === "error") {
+    fail(`git status failed: ${status.error ?? "unknown error"}`);
+  }
+  console.log(formatStatus(status));
+}
+
 function cmdClean(positionals: string[]) {
   const name = positionals[0];
   if (!name) {
@@ -569,6 +716,7 @@ function copyUntrackedWithRsync(
   sourcePath: string,
   files: string[]
 ) {
+  ensureRsync();
   if (files.length === 0) {
     return;
   }
@@ -648,6 +796,7 @@ function mergeWithRsync(
   dryRun: boolean,
   allowDelete: boolean
 ) {
+  ensureRsync();
   const args = ["-a", "--exclude", META_FILE];
   if (dryRun) {
     args.push("--dry-run");
@@ -662,7 +811,11 @@ function mergeWithRsync(
   }
 }
 
-function cmdMerge(flags: Set<string>, positionals: string[]) {
+function cmdMerge(
+  flags: Set<string>,
+  options: Record<string, string>,
+  positionals: string[]
+) {
   const name = positionals[0];
   if (!name) {
     fail("Name is required.");
@@ -682,9 +835,13 @@ function cmdMerge(flags: Set<string>, positionals: string[]) {
   const keep = flags.has("keep");
   const allowDelete = flags.has("delete");
   const gitBase = meta?.gitBase;
-  const wantsBranch = flags.has("branch");
+  const branchOption = options.branch?.trim();
+  if (options.branch !== undefined && !branchOption) {
+    fail("Branch name cannot be empty.");
+  }
+  const wantsBranch = flags.has("branch") || Boolean(branchOption);
   const branchName = wantsBranch
-    ? `cowl/${meta?.name ?? slugify(name)}`
+    ? branchOption ?? `cowl/${meta?.name ?? slugify(name)}`
     : undefined;
 
   if (gitBase && hasGitRepo(sourcePath)) {
@@ -713,6 +870,11 @@ function main() {
 
   const command = args[0];
   const parsed = parseArgs(args.slice(1));
+  if (parsed.flags.has("no-color")) {
+    setColorEnabled(false);
+  } else if (parsed.flags.has("color")) {
+    setColorEnabled(true);
+  }
 
   switch (command) {
     case "new":
@@ -726,6 +888,15 @@ function main() {
       break;
     case "list":
       cmdList(parsed.flags);
+      break;
+    case "root":
+      cmdRoot();
+      break;
+    case "info":
+      cmdInfo(parsed.positionals);
+      break;
+    case "status":
+      cmdStatus(parsed.positionals);
       break;
     case "shell":
       cmdShell(parsed.options, parsed.flags);
@@ -741,7 +912,7 @@ function main() {
       cmdClean(parsed.positionals);
       break;
     case "merge":
-      cmdMerge(parsed.flags, parsed.positionals);
+      cmdMerge(parsed.flags, parsed.options, parsed.positionals);
       break;
     case "help":
       printHelp();
