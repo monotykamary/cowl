@@ -1,5 +1,5 @@
 {
-  "name": "cowl",
+  "name": "@monotykamary/cowl",
   "version": "0.1.0",
   "type": "module",
   "bin": {
@@ -10,13 +10,15 @@
     "build": "bun build src/index.ts --compile --outfile dist/cowl",
     "test": "bun test",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "release": "standard-version"
   },
   "devDependencies": {
     "@types/bun": "latest",
     "@typescript-eslint/eslint-plugin": "^8.53.0",
     "@typescript-eslint/parser": "^8.53.0",
     "eslint": "^9.39.0",
+    "standard-version": "^9.5.0",
     "typescript": "^5.9.3"
   }
 }
