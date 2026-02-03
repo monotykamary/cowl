@@ -188,18 +188,33 @@ function defaultRcPath(shellName: ShellName): string {
   }
 }
 
-function shellSnippet(shellName: ShellName): string {
+function getCowlBinaryPath(): string {
+  // Try to find the cowl binary in PATH
+  const result = run("command", ["-v", "cowl"]);
+  if (result.status === 0) {
+    const path = result.stdout.trim();
+    if (path) {
+      return path;
+    }
+  }
+  // Fallback to process.argv[1] which should be the script path
+  return process.argv[1] || "cowl";
+}
+
+function shellSnippet(shellName: ShellName, cowlPath: string): string {
+  const escapedPath = shellEscape(cowlPath);
+  
   if (shellName === "fish") {
     return `${SHELL_MARKER_START}
 function cowl
   if test (count $argv) -ge 1; and test $argv[1] = "new"
     set -l args $argv
     set -e args[1]
-    set -l path (command cowl new $args | string collect | string trim)
+    set -l path (${escapedPath} new $args | string collect | string trim)
     or return $status
     pushd -- $path
   else
-    command cowl $argv
+    ${escapedPath} $argv
   end
 end
 ${SHELL_MARKER_END}`;
@@ -210,10 +225,10 @@ cowl() {
   if [ "$1" = "new" ]; then
     shift
     local path
-    path="$(command cowl new "$@")" || return
+    path="$(${escapedPath} new "$@")" || return
     pushd -- "$path"
   else
-    command cowl "$@"
+    ${escapedPath} "$@"
   fi
 }
 ${SHELL_MARKER_END}`;
@@ -667,7 +682,8 @@ function cmdClean(positionals: string[]) {
 
 function cmdShell(options: Record<string, string>, flags: Set<string>) {
   const shellName = resolveShellName(options, flags);
-  console.log(shellSnippet(shellName));
+  const cowlPath = getCowlBinaryPath();
+  console.log(shellSnippet(shellName, cowlPath));
 }
 
 function cmdInstallShell(options: Record<string, string>, flags: Set<string>) {
@@ -675,7 +691,8 @@ function cmdInstallShell(options: Record<string, string>, flags: Set<string>) {
   const rcPath = expandHome(options.rc ?? defaultRcPath(shellName));
   ensureDir(dirname(rcPath));
 
-  const snippet = shellSnippet(shellName);
+  const cowlPath = getCowlBinaryPath();
+  const snippet = shellSnippet(shellName, cowlPath);
   const existing = existsSync(rcPath) ? readFileSync(rcPath, "utf8") : "";
   if (
     existing.includes(SHELL_MARKER_START) &&
