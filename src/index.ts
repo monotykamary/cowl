@@ -188,21 +188,68 @@ function defaultRcPath(shellName: ShellName): string {
   }
 }
 
-function getCowlBinaryPath(): string {
-  // Try to find the cowl binary in PATH
-  const result = run("command", ["-v", "cowl"]);
-  if (result.status === 0) {
-    const path = result.stdout.trim();
-    if (path) {
-      return path;
+function getCowlCommand(): { cmd: string; args: string[] } {
+  // Find bun binary first
+  const home = os.homedir();
+  const bunPaths = [
+    join(home, ".bun", "bin", "bun"),
+    "/usr/local/bin/bun",
+    "/usr/bin/bun",
+    join(home, ".local", "bin", "bun"),
+    "/opt/homebrew/bin/bun",
+    "bun", // fallback to PATH
+  ];
+
+  let bunPath: string | null = null;
+  for (const path of bunPaths) {
+    if (path === "bun" || existsSync(path)) {
+      // Verify it works
+      const testResult =
+        path === "bun"
+          ? run("which", ["bun"])
+          : run(path, ["--version"]);
+      if (testResult.status === 0) {
+        bunPath = path === "bun" ? "bun" : path;
+        break;
+      }
     }
   }
-  // Fallback to process.argv[1] which should be the script path
-  return process.argv[1] || "cowl";
+
+  if (!bunPath) {
+    // Can't find bun, fall back to direct cowl call and hope for the best
+    return { cmd: "cowl", args: [] };
+  }
+
+  // Now find the cowl script using type -P (bypasses shell functions)
+  let result = run("bash", ["-c", "type -P cowl 2>/dev/null || echo \"\""]);
+  if (result.status === 0) {
+    const path = result.stdout.trim();
+    if (path && !path.includes("(") && existsSync(path)) {
+      return { cmd: bunPath, args: ["run", path] };
+    }
+  }
+
+  // Check common cowl installation paths
+  const cowlPaths = [
+    join(home, ".bun", "bin", "cowl"),
+    "/usr/local/bin/cowl",
+    "/usr/bin/cowl",
+    join(home, ".local", "bin", "cowl"),
+  ];
+
+  for (const path of cowlPaths) {
+    if (existsSync(path)) {
+      return { cmd: bunPath, args: ["run", path] };
+    }
+  }
+
+  // Fallback: use bun cowl with PATH lookup
+  return { cmd: bunPath, args: ["cowl"] };
 }
 
-function shellSnippet(shellName: ShellName, cowlPath: string): string {
-  const escapedPath = shellEscape(cowlPath);
+function shellSnippet(shellName: ShellName, cowlCmd: { cmd: string; args: string[] }): string {
+  const escapedCmd = shellEscape(cowlCmd.cmd);
+  const escapedArgs = cowlCmd.args.map(arg => shellEscape(arg)).join(' ');
   
   if (shellName === "fish") {
     return `${SHELL_MARKER_START}
@@ -210,11 +257,11 @@ function cowl
   if test (count $argv) -ge 1; and test $argv[1] = "new"
     set -l args $argv
     set -e args[1]
-    set -l path (${escapedPath} new $args | string collect | string trim)
+    set -l path (${escapedCmd} ${escapedArgs} new $args | string collect | string trim)
     or return $status
     pushd -- $path
   else
-    ${escapedPath} $argv
+    ${escapedCmd} ${escapedArgs} $argv
   end
 end
 ${SHELL_MARKER_END}`;
@@ -225,10 +272,10 @@ cowl() {
   if [ "$1" = "new" ]; then
     shift
     local path
-    path="$(${escapedPath} new "$@")" || return
+    path="$(${escapedCmd} ${escapedArgs} new "$@")" || return
     pushd -- "$path"
   else
-    ${escapedPath} "$@"
+    ${escapedCmd} ${escapedArgs} "$@"
   fi
 }
 ${SHELL_MARKER_END}`;
@@ -682,8 +729,8 @@ function cmdClean(positionals: string[]) {
 
 function cmdShell(options: Record<string, string>, flags: Set<string>) {
   const shellName = resolveShellName(options, flags);
-  const cowlPath = getCowlBinaryPath();
-  console.log(shellSnippet(shellName, cowlPath));
+  const cowlCmd = getCowlCommand();
+  console.log(shellSnippet(shellName, cowlCmd));
 }
 
 function cmdInstallShell(options: Record<string, string>, flags: Set<string>) {
@@ -691,8 +738,8 @@ function cmdInstallShell(options: Record<string, string>, flags: Set<string>) {
   const rcPath = expandHome(options.rc ?? defaultRcPath(shellName));
   ensureDir(dirname(rcPath));
 
-  const cowlPath = getCowlBinaryPath();
-  const snippet = shellSnippet(shellName, cowlPath);
+  const cowlCmd = getCowlCommand();
+  const snippet = shellSnippet(shellName, cowlCmd);
   const existing = existsSync(rcPath) ? readFileSync(rcPath, "utf8") : "";
   if (
     existing.includes(SHELL_MARKER_START) &&
