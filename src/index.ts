@@ -433,8 +433,46 @@ function generateVariationName(root: string): string {
   return `variation-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+type VariationContext = {
+  inVariation: true;
+  variationPath: string;
+  variationName: string;
+  sourcePath: string;
+} | {
+  inVariation: false;
+  variationPath: null;
+  variationName: null;
+  sourcePath: string;
+};
+
+function detectVariationContext(): VariationContext {
+  const cwd = realpathSync(process.cwd());
+  const metaPath = join(cwd, META_FILE);
+  
+  // Check if we're in a variation directory
+  if (existsSync(metaPath)) {
+    const meta = readMeta(cwd);
+    if (meta && meta.sourcePath) {
+      return {
+        inVariation: true,
+        variationPath: cwd,
+        variationName: meta.name,
+        sourcePath: meta.sourcePath,
+      };
+    }
+  }
+  
+  return {
+    inVariation: false,
+    variationPath: null,
+    variationName: null,
+    sourcePath: cwd,
+  };
+}
+
 function getSourcePath(): string {
-  return realpathSync(process.cwd());
+  const ctx = detectVariationContext();
+  return ctx.sourcePath;
 }
 
 function getProjectRoot(sourcePath: string): string {
@@ -560,12 +598,14 @@ function printHelp() {
 
 Usage:
   cowl new [name] [--cd]
-  cowl cd <name>
+  cowl cd <name>|host
   cowl path <name>
   cowl list [--all]
   cowl root
   cowl info <name>
   cowl status <name>
+  cowl whereami
+  cowl host
   cowl shell [--shell zsh|bash|fish]
   cowl install-shell [--shell zsh|bash|fish] [--rc path]
   cowl uninstall-shell [--shell zsh|bash|fish] [--rc path]
@@ -574,6 +614,9 @@ Usage:
 
 Notes:
   - Use eval for pushd output, or compose: pushd -- "$(cowl new)".
+  - cd host: navigate from variation back to source directory.
+  - whereami: show current context (variation or source directory).
+  - host: print source directory path (when in a variation).
   - merge uses git when the current directory is a repo root.
   - merge cleans the variation by default; use --keep to retain it.
   - merge --branch creates or switches to cowl/<variation> (git only).
@@ -639,12 +682,56 @@ function cmdCd(positionals: string[]) {
   if (!name) {
     fail("Name is required.");
   }
+  
+  // Special case: "host" navigates back to source directory from variation
+  if (name === "host") {
+    const ctx = detectVariationContext();
+    if (!ctx.inVariation) {
+      fail("Not in a variation directory. Use 'cowl cd <variation-name>' to navigate to a variation.");
+    }
+    console.log(`pushd -- ${shellEscape(ctx.sourcePath)}`);
+    return;
+  }
+  
   const sourcePath = getSourcePath();
   const variationPath = getVariationPath(sourcePath, name);
   if (!existsSync(variationPath)) {
     fail(`Variation does not exist: ${variationPath}`);
   }
   console.log(`pushd -- ${shellEscape(variationPath)}`);
+}
+
+function cmdWhereami() {
+  const ctx = detectVariationContext();
+  
+  if (ctx.inVariation) {
+    console.log(`${fmt.cyan("Location")}: variation`);
+    console.log(`${fmt.cyan("Variation")}: ${ctx.variationName}`);
+    console.log(`${fmt.cyan("Path")}: ${ctx.variationPath}`);
+    console.log(`${fmt.cyan("Source")}: ${ctx.sourcePath}`);
+  } else {
+    console.log(`${fmt.cyan("Location")}: source`);
+    console.log(`${fmt.cyan("Path")}: ${ctx.sourcePath}`);
+    
+    const project = projectSlug(ctx.sourcePath);
+    const rootPath = join(COWL_ROOT, project);
+    if (existsSync(rootPath)) {
+      const variations = readdirSync(rootPath, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => entry.name);
+      if (variations.length > 0) {
+        console.log(`${fmt.cyan("Variations")}: ${variations.join(", ")}`);
+      }
+    }
+  }
+}
+
+function cmdHost() {
+  const ctx = detectVariationContext();
+  if (!ctx.inVariation) {
+    fail("Not in a variation directory.");
+  }
+  console.log(ctx.sourcePath);
 }
 
 function cmdList(flags: Set<string>) {
@@ -980,6 +1067,12 @@ function main() {
       break;
     case "status":
       cmdStatus(parsed.positionals);
+      break;
+    case "whereami":
+      cmdWhereami();
+      break;
+    case "host":
+      cmdHost();
       break;
     case "shell":
       cmdShell(parsed.options, parsed.flags);
