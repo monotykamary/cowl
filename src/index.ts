@@ -653,6 +653,7 @@ Usage:
   cowl status <name>
   cowl whereami
   cowl host
+  cowl doctor
   cowl shell [--shell zsh|bash|fish]
   cowl install-shell [--shell zsh|bash|fish] [--rc path]
   cowl uninstall-shell [--shell zsh|bash|fish] [--rc path]
@@ -664,6 +665,7 @@ Notes:
   - cd host: navigate from variation back to source directory.
   - whereami: show current context (variation or source directory).
   - host: print source directory path (when in a variation).
+  - doctor: diagnose CoW support and system configuration.
   - merge uses git when the current directory is a repo root.
   - merge cleans the variation by default; use --keep to retain it.
   - merge --branch creates or switches to cowl/<variation> (git only).
@@ -780,6 +782,140 @@ function cmdHost() {
     fail("Not in a variation directory.");
   }
   console.log(ctx.sourcePath);
+}
+
+function testCoWSupport(testDir: string): { supported: boolean; method: string; error?: string } {
+  const testFile = join(testDir, ".cowl-cow-test-" + Date.now());
+  const testContent = "test-content-" + Math.random();
+  
+  try {
+    writeFileSync(testFile, testContent);
+    const cloneFile = testFile + "-clone";
+    
+    if (process.platform === "darwin") {
+      // Test clonefile on macOS
+      const result = run("cp", ["-c", testFile, cloneFile]);
+      if (result.status === 0) {
+        rmSync(testFile);
+        rmSync(cloneFile);
+        return { supported: true, method: "clonefile (APFS)" };
+      }
+      rmSync(testFile);
+      return { supported: false, method: "clonefile", error: "clonefile failed, likely not APFS" };
+    } else {
+      // Test reflink on Linux
+      const result = run("cp", ["--reflink=auto", testFile, cloneFile]);
+      if (result.status === 0) {
+        // Check if it was actually a CoW copy by comparing inode numbers
+        const stat1 = run("stat", ["-c", "%i", testFile]);
+        const stat2 = run("stat", ["-c", "%i", cloneFile]);
+        rmSync(testFile);
+        rmSync(cloneFile);
+        
+        if (stat1.status === 0 && stat2.status === 0 && stat1.stdout.trim() === stat2.stdout.trim()) {
+          return { supported: true, method: "reflink (same inode)" };
+        }
+        return { supported: false, method: "reflink", error: "Files have different inodes - filesystem may not support reflink" };
+      }
+      rmSync(testFile);
+      return { supported: false, method: "reflink", error: "cp --reflink failed" };
+    }
+  } catch (err) {
+    try { rmSync(testFile); } catch {}
+    try { rmSync(testFile + "-clone"); } catch {}
+    return { supported: false, method: "unknown", error: String(err) };
+  }
+}
+
+function cmdDoctor() {
+  const cwd = realpathSync(process.cwd());
+  const cowlRoot = COWL_ROOT;
+  const sourcePath = getSourcePath();
+  
+  console.log(`${fmt.cyan("=== cowl Doctor ===")}\n`);
+  
+  // System info
+  console.log(`${fmt.bold("System:")}`);
+  console.log(`  Platform: ${process.platform}`);
+  console.log(`  Current directory: ${cwd}`);
+  
+  // CoW support test
+  console.log(`\n${fmt.bold("Copy-on-Write Support:")}`);
+  const cowTest = testCoWSupport(cwd);
+  if (cowTest.supported) {
+    console.log(`  ${fmt.green("✓ Supported")} (${cowTest.method})`);
+  } else {
+    console.log(`  ${fmt.red("✗ Not supported")}`);
+    console.log(`  Method attempted: ${cowTest.method}`);
+    if (cowTest.error) {
+      console.log(`  Error: ${cowTest.error}`);
+    }
+    console.log(`\n  ${fmt.yellow("Note:")} CoW requires:`);
+    if (process.platform === "darwin") {
+      console.log("    - APFS filesystem (macOS 10.13+ default)");
+    } else {
+      console.log("    - Btrfs or XFS filesystem with reflink support");
+    }
+    console.log("    - Filesystem must support extended attributes");
+  }
+  
+  // Test cowl data directory
+  console.log(`\n${fmt.bold("cowl Data Directory:")}`);
+  console.log(`  Location: ${cowlRoot}`);
+  if (existsSync(cowlRoot)) {
+    const cowlCowTest = testCoWSupport(cowlRoot);
+    if (cowlCowTest.supported) {
+      console.log(`  CoW support: ${fmt.green("Yes")} (${cowlCowTest.method})`);
+    } else {
+      console.log(`  CoW support: ${fmt.red("No")}`);
+    }
+  } else {
+    console.log(`  Status: ${fmt.yellow("Does not exist yet")}`);
+  }
+  
+  // Context
+  console.log(`\n${fmt.bold("Current Context:")}`);
+  const ctx = detectVariationContext();
+  if (ctx.inVariation) {
+    console.log(`  Type: ${fmt.cyan("Variation")}`);
+    console.log(`  Name: ${ctx.variationName}`);
+    console.log(`  Variation path: ${ctx.variationPath}`);
+    console.log(`  Source path: ${ctx.sourcePath}`);
+  } else {
+    console.log(`  Type: ${fmt.cyan("Source directory")}`);
+    console.log(`  Path: ${ctx.sourcePath}`);
+  }
+  
+  // Variations list
+  const project = projectSlug(sourcePath);
+  const projectRoot = join(COWL_ROOT, project);
+  console.log(`\n${fmt.bold("Variations for this project:")}`);
+  if (existsSync(projectRoot)) {
+    const variations = readdirSync(projectRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name);
+    if (variations.length > 0) {
+      variations.forEach((v) => console.log(`  - ${v}`));
+    } else {
+      console.log(`  ${fmt.dim("No variations yet")}`);
+    }
+  } else {
+    console.log(`  ${fmt.dim("No variations yet")}`);
+  }
+  
+  // Summary
+  console.log(`\n${fmt.bold("Summary:")}`);
+  if (cowTest.supported) {
+    console.log(`  ${fmt.green("✓ CoW is working - variations should be fast and space-efficient")}`);
+  } else {
+    console.log(`  ${fmt.red("✗ CoW is not working - variations will use full disk space")}`);
+    console.log(`  ${fmt.yellow("  Consider:")}`);
+    if (process.platform === "darwin") {
+      console.log("    - Ensuring your drive is formatted as APFS");
+    } else {
+      console.log("    - Using Btrfs or XFS for your project directory");
+    }
+  }
 }
 
 function cmdList(flags: Set<string>) {
@@ -1120,6 +1256,9 @@ function main() {
       break;
     case "host":
       cmdHost();
+      break;
+    case "doctor":
+      cmdDoctor();
       break;
     case "shell":
       cmdShell(parsed.options, parsed.flags);
