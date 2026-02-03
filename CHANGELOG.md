@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.2](https://github.com/monotykamary/cowl/compare/v0.1.1...v0.1.2) (2026-02-03)
+
+
+### Features
+
+* **shell:** add runtime detection for npm and bun compatibility ([9c0887d](https://github.com/monotykamary/cowl/commit/9c0887db9eddfa8bfdd9979b20fb98840e6cbbcb))
+
+
+### Bug Fixes
+
+* **shell:** explicitly use bun to run cowl in shell wrapper ([57733c3](https://github.com/monotykamary/cowl/commit/57733c39f2cdbc4c4910e1c242607f42ea1a59ac))
+* **shell:** use process.execPath for bun binary detection ([6745e06](https://github.com/monotykamary/cowl/commit/6745e06ddd54d9fa2d9052dabe607c67bbdf1578))
+
 ### 0.1.1 (2026-02-03)
 
 
