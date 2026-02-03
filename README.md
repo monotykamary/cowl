@@ -116,24 +116,60 @@ cowl clean <name>
 
 ## Behavior
 
-- Variations live in `~/.cowl/<basename>-<hash>/<variation>`.
+- Variations live in `~/.local/share/cowl/<basename>-<hash>/<variation>` (XDG Base Directory compliant).
 - `cowl new` uses the current directory as the source.
 - Git merge: if the source directory is a git repo root, merge uses git 3-way apply and syncs untracked files.
 - `cowl merge --branch` creates or switches to `cowl/<variation>` in the source repo.
 - Rsync merge: if git is unavailable, merge uses rsync; deletions are opt-in with `--delete`.
 - Use `--no-color` or `NO_COLOR=1` to disable ANSI formatting.
 
+### Context Awareness
+
+When you run commands from within a variation directory, cowl automatically detects this and works with the source directory:
+
+```bash
+cowl whereami   # Show current context (variation or source)
+cowl host       # Print source directory path when in a variation
+cowl cd host    # Navigate back to source from a variation
+cowl list       # List variations (works from within variation too)
+```
+
 ## Commands
 
-- `cowl new [name] [--cd]`
-- `cowl cd <name>`
-- `cowl path <name>`
-- `cowl list [--all]`
-- `cowl root`
-- `cowl info <name>`
-- `cowl status <name>`
-- `cowl shell [--shell zsh|bash|fish]`
-- `cowl install-shell [--shell zsh|bash|fish] [--rc path]`
-- `cowl uninstall-shell [--shell zsh|bash|fish] [--rc path]`
-- `cowl merge <name> [--dry-run] [--keep] [--delete] [--branch [name]]`
-- `cowl clean <name>`
+- `cowl new [name] [--cd]` - Create a new variation
+- `cowl cd <name>|host` - Navigate to a variation or back to source
+- `cowl path <name>` - Print variation path
+- `cowl list [--all]` - List variations for current project
+- `cowl root` - Show project root directory
+- `cowl info <name>` - Show variation details
+- `cowl status <name>` - Check variation git status
+- `cowl whereami` - Show current context
+- `cowl host` - Print source path (when in variation)
+- `cowl doctor` - Diagnose CoW support and system configuration
+- `cowl shell [--shell zsh|bash|fish]` - Print shell integration snippet
+- `cowl install-shell [--shell zsh|bash|fish] [--rc path]` - Install shell wrapper
+- `cowl uninstall-shell [--shell zsh|bash|fish] [--rc path]` - Remove shell wrapper
+- `cowl merge <name> [--dry-run] [--keep] [--delete] [--branch [name]]` - Merge changes back
+- `cowl clean <name>` - Delete a variation
+
+## Known Limitations
+
+### Enterprise Security Software (EDR)
+
+**Issue**: When using cowl on machines with endpoint detection and response (EDR) software like CrowdStrike, `cowl new` may be significantly slower than expected, even though Copy-on-Write is technically working.
+
+**Why**: cowl copies the entire directory including all files (e.g., `node_modules/`, build artifacts), while git worktrees only checkout tracked source files. With 5,000+ files in a typical project:
+
+- Git worktree: ~20 files (source code only)
+- cowl variation: ~5,000+ files (including node_modules)
+
+Each file operation triggers EDR scanning hooks. With 10ms scan latency per file:
+- Git worktree: 20 × 10ms = 0.2 seconds ✅
+- cowl: 5,000 × 10ms = **50+ seconds** ❌
+
+**Workaround**: 
+- Use git worktrees for quick branches where you don't need full environment isolation
+- Use cowl when you need complete isolation (different dependency versions, experimental changes)
+- Accept the slower creation time as the cost of complete isolation
+
+**Verify CoW is working**: Run `cowl doctor` to test CoW support and see if your system supports it properly.
