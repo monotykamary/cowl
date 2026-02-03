@@ -14,10 +14,26 @@ import {
 import { spawnSync } from "child_process";
 import { createHash } from "crypto";
 
-const META_FILE = ".cowl.json";
-const COWL_ROOT = join(os.homedir(), ".cowl");
+// XDG Base Directory compliance
+// Data goes to $XDG_DATA_HOME/cowl (default: ~/.local/share/cowl)
+// Config would go to $XDG_CONFIG_HOME/cowl (default: ~/.config/cowl)
+function getCowlDataDir(): string {
+  const xdgDataHome = process.env.XDG_DATA_HOME;
+  if (xdgDataHome) {
+    return join(xdgDataHome, "cowl");
+  }
+  return join(os.homedir(), ".local", "share", "cowl");
+}
+
+const COWL_ROOT = getCowlDataDir();
+const META_DIR = join(COWL_ROOT, "meta");
 const SHELL_MARKER_START = "# >>> cowl shell >>>";
 const SHELL_MARKER_END = "# <<< cowl shell <<<";
+
+function getMetaPath(variationPath: string): string {
+  const hash = createHash("sha256").update(variationPath).digest("hex").slice(0, 16);
+  return join(META_DIR, `${hash}.json`);
+}
 
 let useColor = process.stdout.isTTY && !process.env.NO_COLOR;
 
@@ -46,6 +62,7 @@ type Meta = {
   name: string;
   project: string;
   sourcePath: string;
+  variationPath: string;
   createdAt: string;
   gitBase?: string;
 };
@@ -338,7 +355,7 @@ function ensureDir(path: string) {
 }
 
 function readMeta(variationPath: string): Meta | null {
-  const metaPath = join(variationPath, META_FILE);
+  const metaPath = getMetaPath(variationPath);
   if (!existsSync(metaPath)) {
     return null;
   }
@@ -351,8 +368,41 @@ function readMeta(variationPath: string): Meta | null {
 }
 
 function writeMeta(variationPath: string, meta: Meta) {
-  const metaPath = join(variationPath, META_FILE);
+  ensureDir(META_DIR);
+  const metaPath = getMetaPath(variationPath);
   writeFileSync(metaPath, JSON.stringify(meta, null, 2));
+}
+
+function deleteMeta(variationPath: string) {
+  const metaPath = getMetaPath(variationPath);
+  if (existsSync(metaPath)) {
+    rmSync(metaPath);
+  }
+}
+
+function findVariationByPath(cwd: string): { variationPath: string; meta: Meta } | null {
+  if (!existsSync(META_DIR)) {
+    return null;
+  }
+  
+  const files = readdirSync(META_DIR, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.json'));
+  
+  for (const file of files) {
+    try {
+      const metaPath = join(META_DIR, file.name);
+      const raw = readFileSync(metaPath, "utf8");
+      const meta = JSON.parse(raw) as Meta;
+      // Check if cwd is the variation or inside it
+      if (cwd === meta.variationPath || cwd.startsWith(meta.variationPath + '/')) {
+        return { variationPath: meta.variationPath, meta };
+      }
+    } catch {
+      continue;
+    }
+  }
+  
+  return null;
 }
 
 const ADJECTIVES = [
@@ -447,19 +497,16 @@ type VariationContext = {
 
 function detectVariationContext(): VariationContext {
   const cwd = realpathSync(process.cwd());
-  const metaPath = join(cwd, META_FILE);
   
-  // Check if we're in a variation directory
-  if (existsSync(metaPath)) {
-    const meta = readMeta(cwd);
-    if (meta && meta.sourcePath) {
-      return {
-        inVariation: true,
-        variationPath: cwd,
-        variationName: meta.name,
-        sourcePath: meta.sourcePath,
-      };
-    }
+  // Check if we're in a variation directory using centralized meta
+  const variationInfo = findVariationByPath(cwd);
+  if (variationInfo) {
+    return {
+      inVariation: true,
+      variationPath: variationInfo.variationPath,
+      variationName: variationInfo.meta.name,
+      sourcePath: variationInfo.meta.sourcePath,
+    };
   }
   
   return {
@@ -652,6 +699,7 @@ function cmdNew(flags: Set<string>, positionals: string[]) {
     name: slug,
     project,
     sourcePath,
+    variationPath,
     createdAt: new Date().toISOString(),
     gitBase: getGitBase(sourcePath) ?? undefined,
   };
@@ -892,11 +940,10 @@ function copyUntrackedWithRsync(
   }
   const tmpDir = mkdtempSync(join(os.tmpdir(), "cowl-"));
   const listPath = join(tmpDir, "files");
-  const filtered = files.filter((file) => file !== META_FILE);
-  if (filtered.length === 0) {
+  if (files.length === 0) {
     return;
   }
-  writeFileSync(listPath, filtered.join("\0") + "\0");
+  writeFileSync(listPath, files.join("\0") + "\0");
   const result = run("rsync", [
     "-a",
     "--from0",
@@ -967,7 +1014,7 @@ function mergeWithRsync(
   allowDelete: boolean
 ) {
   ensureRsync();
-  const args = ["-a", "--exclude", META_FILE];
+  const args = ["-a"];
   if (dryRun) {
     args.push("--dry-run");
   }

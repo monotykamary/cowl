@@ -11,6 +11,7 @@ import {
 import { basename, join, resolve } from "path";
 import os from "os";
 import { spawnSync } from "child_process";
+import { createHash } from "crypto";
 
 const repoRoot = resolve(import.meta.dir, "..");
 const cliPath = join(repoRoot, "src", "index.ts");
@@ -101,9 +102,8 @@ test("new creates variation and helpers work", () => {
       "hello"
     );
 
-    const meta = JSON.parse(
-      readFileSync(join(variationPath, ".cowl.json"), "utf8")
-    );
+    const metaPath = join(sandbox.home, ".local", "share", "cowl", "meta", `${createHash("sha256").update(variationPath).digest("hex").slice(0, 16)}.json`);
+    const meta = JSON.parse(readFileSync(metaPath, "utf8"));
     expect(meta.sourcePath).toBe(realpathSync(sandbox.source));
 
     const name = basename(variationPath);
