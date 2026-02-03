@@ -189,47 +189,24 @@ function defaultRcPath(shellName: ShellName): string {
 }
 
 function getCowlCommand(): { cmd: string; args: string[] } {
-  // Find bun binary first
+  // Use the currently running bun executable
+  const bunPath = process.execPath;
   const home = os.homedir();
-  const bunPaths = [
-    join(home, ".bun", "bin", "bun"),
-    "/usr/local/bin/bun",
-    "/usr/bin/bun",
-    join(home, ".local", "bin", "bun"),
-    "/opt/homebrew/bin/bun",
-    "bun", // fallback to PATH
-  ];
 
-  let bunPath: string | null = null;
-  for (const path of bunPaths) {
-    if (path === "bun" || existsSync(path)) {
-      // Verify it works
-      const testResult =
-        path === "bun"
-          ? run("which", ["bun"])
-          : run(path, ["--version"]);
-      if (testResult.status === 0) {
-        bunPath = path === "bun" ? "bun" : path;
-        break;
-      }
-    }
-  }
-
-  if (!bunPath) {
-    // Can't find bun, fall back to direct cowl call and hope for the best
-    return { cmd: "cowl", args: [] };
-  }
-
-  // Now find the cowl script using type -P (bypasses shell functions)
-  let result = run("bash", ["-c", "type -P cowl 2>/dev/null || echo \"\""]);
+  // Find the cowl script using type -P (bypasses shell functions)
+  const result = run("bash", [
+    "-c",
+    "type -P cowl 2>/dev/null || echo \"\"",
+  ]);
   if (result.status === 0) {
     const path = result.stdout.trim();
-    if (path && !path.includes("(") && existsSync(path)) {
+    // Make sure it's a file path, not a function definition
+    if (path && path.startsWith("/") && existsSync(path)) {
       return { cmd: bunPath, args: ["run", path] };
     }
   }
 
-  // Check common cowl installation paths
+  // Check common cowl installation paths (bun global)
   const cowlPaths = [
     join(home, ".bun", "bin", "cowl"),
     "/usr/local/bin/cowl",
@@ -243,8 +220,14 @@ function getCowlCommand(): { cmd: string; args: string[] } {
     }
   }
 
-  // Fallback: use bun cowl with PATH lookup
-  return { cmd: bunPath, args: ["cowl"] };
+  // Fallback: try to use the current script path
+  const scriptPath = process.argv[1];
+  if (scriptPath && existsSync(scriptPath)) {
+    return { cmd: bunPath, args: ["run", scriptPath] };
+  }
+
+  // Last resort: hope bun is in PATH
+  return { cmd: "bun", args: ["cowl"] };
 }
 
 function shellSnippet(shellName: ShellName, cowlCmd: { cmd: string; args: string[] }): string {
