@@ -29,7 +29,7 @@ function color(code: string, value: string): string {
   if (!useColor) {
     return value;
   }
-  return `\\x1b[${code}m${value}\\x1b[0m`;
+  return `\x1b[${code}m${value}\x1b[0m`;
 }
 
 const fmt = {
