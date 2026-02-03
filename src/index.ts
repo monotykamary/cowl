@@ -188,12 +188,39 @@ function defaultRcPath(shellName: ShellName): string {
   }
 }
 
+function detectRuntime(): { name: string; execPath: string } {
+  const execPath = process.execPath;
+  // Check if we're running under bun or node
+  if (execPath.includes("bun") || typeof Bun !== "undefined") {
+    return { name: "bun", execPath };
+  }
+  return { name: "node", execPath };
+}
+
+function isScriptFile(path: string): boolean {
+  try {
+    // Read first line to check for shebang
+    const fd = readFileSync(path, "utf8");
+    const firstLine = fd.split("\n")[0] || "";
+    // Check if it's a text file with shebang
+    if (firstLine.startsWith("#!")) {
+      return true;
+    }
+    // Check file extension
+    if (path.endsWith(".ts") || path.endsWith(".js")) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function getCowlCommand(): { cmd: string; args: string[] } {
-  // Use the currently running bun executable
-  const bunPath = process.execPath;
+  const runtime = detectRuntime();
   const home = os.homedir();
 
-  // Find the cowl script using type -P (bypasses shell functions)
+  // Find the cowl binary using type -P (bypasses shell functions)
   const result = run("bash", [
     "-c",
     "type -P cowl 2>/dev/null || echo \"\"",
@@ -202,11 +229,16 @@ function getCowlCommand(): { cmd: string; args: string[] } {
     const path = result.stdout.trim();
     // Make sure it's a file path, not a function definition
     if (path && path.startsWith("/") && existsSync(path)) {
-      return { cmd: bunPath, args: ["run", path] };
+      // If it's a script file, we need to run it with the runtime
+      if (isScriptFile(path)) {
+        return { cmd: runtime.execPath, args: [path] };
+      }
+      // Otherwise it's a compiled binary or shell wrapper, run it directly
+      return { cmd: path, args: [] };
     }
   }
 
-  // Check common cowl installation paths (bun global)
+  // Check common cowl installation paths
   const cowlPaths = [
     join(home, ".bun", "bin", "cowl"),
     "/usr/local/bin/cowl",
@@ -216,18 +248,22 @@ function getCowlCommand(): { cmd: string; args: string[] } {
 
   for (const path of cowlPaths) {
     if (existsSync(path)) {
-      return { cmd: bunPath, args: ["run", path] };
+      // Check if it's a script file
+      if (isScriptFile(path)) {
+        return { cmd: runtime.execPath, args: [path] };
+      }
+      return { cmd: path, args: [] };
     }
   }
 
   // Fallback: try to use the current script path
   const scriptPath = process.argv[1];
   if (scriptPath && existsSync(scriptPath)) {
-    return { cmd: bunPath, args: ["run", scriptPath] };
+    return { cmd: runtime.execPath, args: [scriptPath] };
   }
 
-  // Last resort: hope bun is in PATH
-  return { cmd: "bun", args: ["cowl"] };
+  // Last resort: hope the command is in PATH
+  return { cmd: runtime.name, args: ["cowl"] };
 }
 
 function shellSnippet(shellName: ShellName, cowlCmd: { cmd: string; args: string[] }): string {
