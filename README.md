@@ -4,6 +4,18 @@ Copy-on-write variations for a directory. `cowl` makes a CoW clone into a global
 
 ## Install
 
+- Install via npm:
+
+```bash
+npm install -g @monotykamary/cowl
+```
+
+- Install via bun:
+
+```bash
+bun install -g @monotykamary/cowl
+```
+
 - Build a standalone binary:
 
 ```bash
