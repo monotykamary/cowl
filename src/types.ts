@@ -6,6 +6,7 @@ export type Meta = {
   variationPath: string;
   createdAt: string;
   gitBase?: string;
+  type?: "cow" | "worktree";
 };
 
 export type ShellName = "bash" | "fish" | "zsh";

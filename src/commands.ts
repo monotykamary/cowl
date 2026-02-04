@@ -22,6 +22,7 @@ import {
   run,
   randomItem,
   hasGitRepo,
+  resultError,
 } from "./utils.js";
 
 export function cmdNew(
@@ -46,7 +47,40 @@ export function cmdNew(
     fail(`Variation already exists: ${variationPath}`);
   }
 
-  cowCopyDir(sourcePath, variationPath);
+  const useWorktree = flags.has("worktree");
+  
+  if (useWorktree) {
+    // Worktree mode: use git worktree add
+    if (!hasGitRepo(sourcePath)) {
+      fail("Worktree mode requires a git repository.");
+    }
+    
+    const branchName = `cowl/${slug}`;
+    
+    // Create the branch first
+    const branchResult = run("git", ["-C", sourcePath, "branch", branchName]);
+    if (branchResult.status !== 0) {
+      fail(`Failed to create branch ${branchName}: ${resultError(branchResult)}`);
+    }
+    
+    // Create the worktree
+    const worktreeResult = run("git", [
+      "-C", 
+      sourcePath, 
+      "worktree", 
+      "add", 
+      variationPath, 
+      branchName
+    ]);
+    if (worktreeResult.status !== 0) {
+      // Clean up the branch if worktree creation failed
+      run("git", ["-C", sourcePath, "branch", "-D", branchName]);
+      fail(`Failed to create worktree: ${resultError(worktreeResult)}`);
+    }
+  } else {
+    // CoW mode: use copy-on-write clone
+    cowCopyDir(sourcePath, variationPath);
+  }
 
   const meta: Meta = {
     version: 1,
@@ -56,6 +90,7 @@ export function cmdNew(
     variationPath,
     createdAt: new Date().toISOString(),
     gitBase: getGitBase(sourcePath) ?? undefined,
+    type: useWorktree ? "worktree" : "cow",
   };
   writeMeta(variationPath, meta);
 
@@ -170,7 +205,27 @@ export function cmdMerge(
   }
 
   if (!dryRun && !keep) {
-    rmSync(variationPath, { recursive: true, force: false });
+    if (meta?.type === "worktree") {
+      // For worktrees, use git worktree remove and delete branch
+      const branchName = `cowl/${meta.name}`;
+      
+      // Remove the worktree
+      const removeResult = run("git", ["-C", sourcePath, "worktree", "remove", variationPath]);
+      if (removeResult.status !== 0) {
+        console.error(fmt.yellow(`Warning: Failed to remove worktree: ${resultError(removeResult)}`));
+        // Try manual cleanup as fallback
+        rmSync(variationPath, { recursive: true, force: true });
+      }
+      
+      // Delete the branch
+      const deleteBranchResult = run("git", ["-C", sourcePath, "branch", "-D", branchName]);
+      if (deleteBranchResult.status !== 0) {
+        console.error(fmt.yellow(`Warning: Failed to delete branch ${branchName}: ${resultError(deleteBranchResult)}`));
+      }
+    } else {
+      // For CoW variations, just delete the directory
+      rmSync(variationPath, { recursive: true, force: false });
+    }
     deleteMeta(variationPath);
   }
 }

@@ -30,7 +30,7 @@ function printHelp() {
   console.log(`cowl: copy-on-write variations for a directory
 
 Usage:
-  cowl new [name] [--cd]
+  cowl new [name] [--cd] [--worktree]
   cowl cd <name>|host
   cowl path <name>
   cowl list [--all]
@@ -52,7 +52,8 @@ Notes:
   - whereami: show current context (variation or source directory).
   - host: print source directory path (when in a variation).
   - doctor: diagnose CoW support and system configuration.
-  - merge uses git when the current directory is a repo root.
+  - --worktree: use git worktree instead of CoW (faster with EDR/AV software).
+  - merge uses git when the current directory is a git repo root.
   - merge cleans the variation by default; use --keep to retain it.
   - merge --branch creates or switches to cowl/<variation> (git only).
   - install-shell adds a wrapper so cowl new runs pushd automatically.

@@ -16,6 +16,8 @@ import {
   formatStatus,
   fmt,
   shortSha,
+  run,
+  resultError,
 } from "./utils.js";
 
 export function getProjectRoot(sourcePath: string): string {
@@ -132,7 +134,31 @@ export function cmdClean(name: string, sourcePath: string) {
   if (!existsSync(variationPath)) {
     fail(`Variation does not exist: ${variationPath}`);
   }
-  rmSync(variationPath, { recursive: true, force: false });
+  
+  const meta = readMeta(variationPath);
+  
+  if (meta?.type === "worktree") {
+    // For worktrees, use git worktree remove and delete branch
+    const branchName = `cowl/${meta.name}`;
+    
+    // Remove the worktree
+    const removeResult = run("git", ["-C", sourcePath, "worktree", "remove", variationPath]);
+    if (removeResult.status !== 0) {
+      console.error(fmt.yellow(`Warning: Failed to remove worktree: ${resultError(removeResult)}`));
+      // Try manual cleanup as fallback
+      rmSync(variationPath, { recursive: true, force: true });
+    }
+    
+    // Delete the branch
+    const deleteBranchResult = run("git", ["-C", sourcePath, "branch", "-D", branchName]);
+    if (deleteBranchResult.status !== 0) {
+      console.error(fmt.yellow(`Warning: Failed to delete branch ${branchName}: ${resultError(deleteBranchResult)}`));
+    }
+  } else {
+    // For CoW variations, just delete the directory
+    rmSync(variationPath, { recursive: true, force: false });
+  }
+  
   deleteMeta(variationPath);
 }
 
