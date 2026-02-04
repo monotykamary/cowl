@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.1.5](https://github.com/monotykamary/cowl/compare/v0.1.4...v0.1.5) (2026-02-04)
+
+
+### Features
+
+* add --worktree flag for EDR/AV environments ([72eb36f](https://github.com/monotykamary/cowl/commit/72eb36f227841d5cba8c79576f42b9da8ff9eeaf))
+* add type field to cowl info output ([a1953dd](https://github.com/monotykamary/cowl/commit/a1953dd2a6b67e72267c5d0e55e584d91f9d1e00))
+
 ### [0.1.4](https://github.com/monotykamary/cowl/compare/v0.1.3...v0.1.4) (2026-02-03)
 
 

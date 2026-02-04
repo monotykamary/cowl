@@ -1,6 +1,6 @@
 {
   "name": "@monotykamary/cowl",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "bin": {
     "cowl": "src/index.ts"
