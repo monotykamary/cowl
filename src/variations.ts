@@ -94,6 +94,7 @@ export function cmdInfo(name: string, sourcePath: string) {
 
   const lines = [
     `${fmt.cyan("Name")}: ${meta?.name ?? slugify(name)}`,
+    `${fmt.cyan("Type")}: ${meta?.type ?? "cow"}`,
     `${fmt.cyan("Path")}: ${variationPath}`,
     `${fmt.cyan("Root")}: ${rootPath}`,
     `${fmt.cyan("Source")}: ${meta?.sourcePath ?? fmt.dim("unknown")}`,
